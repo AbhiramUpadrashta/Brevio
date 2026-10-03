@@ -1,0 +1,91 @@
+# The app's source code is private (AbhiramUpadrashta/Brevio-src). This public repo only builds and
+# publishes the finished app and its website, so people can download it. A read-only deploy key
+# (secret SRC_KEY) lets these workflows check out the private code.
+name: Build & Release Brevio
+on:
+  schedule:
+    - cron: "17 * * * *"     # every hour: build when the private code has a new version
+  workflow_dispatch:
+    inputs:
+      force: { description: "Rebuild even if this version is already published", type: boolean, default: false }
+permissions:
+  contents: write
+concurrency: { group: release, cancel-in-progress: false }
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      build: ${{ steps.v.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { repository: AbhiramUpadrashta/Brevio-src, ssh-key: "${{ secrets.SRC_KEY }}" }
+      - id: v
+        env: { GH_TOKEN: "${{ github.token }}", GH_REPO: "${{ github.repository }}", FORCE: "${{ inputs.force }}" }
+        run: |
+          V=$(node -p "require('./package.json').version")
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          have=$(gh release view "v$V" --json assets -q '.assets[].name' 2>/dev/null || true)
+          need=0; for a in Brevio-mac.zip Brevio-Setup.exe; do echo "$have" | grep -qx "$a" || need=1; done
+          if [ "$FORCE" = "true" ]; then need=1; fi
+          echo "Version $V — build needed: $need"
+          echo "build=$([ $need = 1 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+  build:
+    needs: check
+    if: needs.check.outputs.build == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest, target: mac }
+          - { os: windows-latest, target: win }
+    runs-on: ${{ matrix.os }}
+    env: { CSC_IDENTITY_AUTO_DISCOVERY: "false" }
+    steps:
+      - uses: actions/checkout@v4
+        with: { repository: AbhiramUpadrashta/Brevio-src, ssh-key: "${{ secrets.SRC_KEY }}" }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm install --no-audit --no-fund
+      - name: Build macOS app
+        if: matrix.target == 'mac'
+        run: |
+          npm run dist:mac
+          APP="$(find dist -maxdepth 2 -name 'Brevio.app' | head -1)"
+          codesign --force --deep --sign - "$APP"
+          ditto -c -k --sequesterRsrc --keepParent "$APP" dist/Brevio-mac.zip
+          cp dist/Brevio-mac.zip dist/Mivelle-mac.zip
+      - name: Build Windows installer
+        if: matrix.target == 'win'
+        shell: bash
+        run: |
+          npm run dist:win
+          cp dist/Brevio-Setup.exe dist/Mivelle-Setup.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: brevio-${{ matrix.target }}
+          path: |
+            dist/Brevio-mac.zip
+            dist/Brevio-Setup.exe
+            dist/Mivelle-mac.zip
+            dist/Mivelle-Setup.exe
+          if-no-files-found: error
+  release:
+    needs: [check, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: out, merge-multiple: true }
+      - name: Publish release
+        env: { GH_TOKEN: "${{ github.token }}", GH_REPO: "${{ github.repository }}" }
+        run: |
+          VERSION=${{ needs.check.outputs.version }}; TAG="v$VERSION"; TITLE="Brevio $VERSION"
+          FILES="out/Brevio-mac.zip out/Brevio-Setup.exe out/Mivelle-mac.zip out/Mivelle-Setup.exe"
+          NOTES="Brevio $VERSION — a light desktop companion for macOS and Windows by Bubbles Aro.
+
+          **Mac:** download Brevio-mac.zip → open Brevio → Move to Applications.
+          **Windows:** download Brevio-Setup.exe → run it.
+
+          Website: https://bubbles-hq.netlify.app/brevio/"
+          if gh release view "$TAG" >/dev/null 2>&1; then gh release upload "$TAG" $FILES --clobber
+          else gh release create "$TAG" $FILES --title "$TITLE" --notes "$NOTES" --latest || gh release upload "$TAG" $FILES --clobber; fi

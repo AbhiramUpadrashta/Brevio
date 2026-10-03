@@ -1,0 +1,50 @@
+# The app's source code is private (AbhiramUpadrashta/Brevio-src). This public repo only builds and
+# publishes the finished app and its website, so people can download it. A read-only deploy key
+# (secret SRC_KEY) lets these workflows check out the private code.
+name: Publish website
+on:
+  schedule:
+    - cron: "43 * * * *"     # every hour: publish when the private website files change
+  workflow_dispatch:
+    inputs:
+      force: { description: "Publish even if nothing changed", type: boolean, default: false }
+permissions: { contents: write, pages: write, id-token: write }
+concurrency: { group: pages, cancel-in-progress: false }
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.c.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { repository: AbhiramUpadrashta/Brevio-src, ssh-key: "${{ secrets.SRC_KEY }}" }
+      - id: c
+        env: { GH_TOKEN: "${{ github.token }}", GH_REPO: "${{ github.repository }}", FORCE: "${{ inputs.force }}" }
+        run: |
+          SHA=$(git rev-parse HEAD); echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          last=$(gh api "repos/$GH_REPO/commits/site" -q .commit.message 2>/dev/null || true)
+          if [ "$FORCE" != "true" ] && echo "$last" | grep -q "$SHA"; then echo "changed=false" >> "$GITHUB_OUTPUT"; else echo "changed=true" >> "$GITHUB_OUTPUT"; fi
+      - name: Build website
+        if: steps.c.outputs.changed == 'true'
+        env: { GH_TOKEN: "${{ github.token }}", GH_REPO: "${{ github.repository }}" }
+        run: |
+          cp -R docs _site
+          find _site \( -name .DS_Store -o -name CNAME \) -delete
+      - name: Update the site branch (used by bubbles-hq.netlify.app)
+        if: steps.c.outputs.changed == 'true'
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          cd _site && git init -q -b site && git add -A
+          git -c user.name="bubbles-bot" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -qm "Website from src:${{ steps.c.outputs.sha }}"
+          git push -qf "https://x-access-token:$GH_TOKEN@github.com/${{ github.repository }}.git" site
+      - if: steps.c.outputs.changed == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with: { path: _site }
+  deploy:
+    needs: build
+    if: needs.build.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    environment: { name: github-pages, url: "${{ steps.d.outputs.page_url }}" }
+    steps:
+      - id: d
+        uses: actions/deploy-pages@v4

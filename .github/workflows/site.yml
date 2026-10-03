@@ -3,6 +3,9 @@
 # (secret SRC_KEY) lets these workflows check out the private code.
 name: Publish website
 on:
+  push:
+    branches: [main]
+    paths: ["publish.txt"]
   schedule:
     - cron: "43 * * * *"     # every hour: publish when the private website files change
   workflow_dispatch:

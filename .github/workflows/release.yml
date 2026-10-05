@@ -3,6 +3,9 @@
 # (secret SRC_KEY) lets these workflows check out the private code.
 name: Build & Release Brevio
 on:
+  push:
+    branches: [main]
+    paths: ["release.txt"]
   schedule:
     - cron: "17 * * * *"     # every hour: build when the private code has a new version
   workflow_dispatch:

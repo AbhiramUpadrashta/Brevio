@@ -1,0 +1,65 @@
+# Automated check: start Brevio on Windows and drag the companion with real mouse input.
+name: Test dragging on Windows
+on:
+  push:
+    branches: [main]
+    paths: ["test-drag.txt"]
+  workflow_dispatch:
+jobs:
+  drag:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { repository: AbhiramUpadrashta/Brevio-src, ssh-key: "${{ secrets.SRC_KEY }}", ref: "${{ github.event_name == 'push' && 'main' || 'main' }}" }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm install --no-audit --no-fund
+      - name: Drag test
+        shell: pwsh
+        run: |
+          $trace = "$env:RUNNER_TEMP\trace.jsonl"
+          $env:BREVIO_TRACE = $trace
+          New-Item -ItemType Directory -Force "$env:APPDATA\Mivelle" | Out-Null
+          '{"firstRun":false,"reactNotifications":false,"reactMeetings":false,"reactMusic":false,"breakReminder":false}' | Set-Content "$env:APPDATA\Mivelle\settings.json"
+          $p = Start-Process -FilePath "node_modules\electron\dist\electron.exe" -ArgumentList "." -PassThru
+          Start-Sleep -Seconds 12
+          Add-Type @"
+          using System; using System.Runtime.InteropServices;
+          public class M {
+            [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+            [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint dx, uint dy, uint d, IntPtr e);
+            [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+            [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+          }
+          "@
+          [M]::SetProcessDPIAware() | Out-Null
+          $last = (Get-Content $trace | Select-Object -Last 1 | ConvertFrom-Json)
+          Write-Host "start bounds: $($last.b | ConvertTo-Json -Compress)"
+          $b = $last.b
+          $cx = [int]($b.x + $b.width / 2); $cy = [int]($b.y + $b.height * 0.7)
+          Write-Host "grab at $cx,$cy"
+          # hover first, so the companion can catch the mouse
+          for ($i = 0; $i -lt 8; $i++) { [M]::SetCursorPos($cx - 4 + $i, $cy) | Out-Null; Start-Sleep -Milliseconds 120 }
+          Start-Sleep -Milliseconds 400
+          [M]::mouse_event(0x0002, 0, 0, 0, [IntPtr]::Zero)   # left down
+          Start-Sleep -Milliseconds 150
+          for ($i = 1; $i -le 30; $i++) { [M]::SetCursorPos($cx - 10 * $i, $cy - 6 * $i) | Out-Null; Start-Sleep -Milliseconds 30 }
+          Start-Sleep -Milliseconds 300
+          [M]::mouse_event(0x0004, 0, 0, 0, [IntPtr]::Zero)   # left up
+          Start-Sleep -Seconds 4
+          # second drag from the new spot
+          $last = (Get-Content $trace | Select-Object -Last 1 | ConvertFrom-Json); $b = $last.b
+          Write-Host "after drag 1: $($b | ConvertTo-Json -Compress)"
+          $cx = [int]($b.x + $b.width / 2); $cy = [int]($b.y + $b.height * 0.7)
+          for ($i = 0; $i -lt 8; $i++) { [M]::SetCursorPos($cx - 4 + $i, $cy) | Out-Null; Start-Sleep -Milliseconds 120 }
+          [M]::mouse_event(0x0002, 0, 0, 0, [IntPtr]::Zero)
+          for ($i = 1; $i -le 20; $i++) { [M]::SetCursorPos($cx + 8 * $i, $cy + 3 * $i) | Out-Null; Start-Sleep -Milliseconds 30 }
+          [M]::mouse_event(0x0004, 0, 0, 0, [IntPtr]::Zero)
+          Start-Sleep -Seconds 4
+          $last = (Get-Content $trace | Select-Object -Last 1 | ConvertFrom-Json)
+          Write-Host "after drag 2: $($last.b | ConvertTo-Json -Compress)"
+          Write-Host "---- events ----"
+          Get-Content $trace | ForEach-Object { $j = $_ | ConvertFrom-Json; if ($j.ev.Count -gt 0) { Write-Host ("{0} {1} drag={2} {3}" -f $j.t, ($j.b | ConvertTo-Json -Compress), $j.drag, ($j.ev -join ' ')) } }
+          Write-Host "---- settings ----"; Get-Content "$env:APPDATA\Mivelle\settings.json" | Select-String "position|customPos" 
+          Write-Host "---- log ----"; if (Test-Path "$env:APPDATA\Mivelle\brevio.log") { Get-Content "$env:APPDATA\Mivelle\brevio.log" }
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue

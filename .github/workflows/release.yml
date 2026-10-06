@@ -50,6 +50,13 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - run: npm install --no-audit --no-fund
+      - name: Build the Mac sensor (mic / camera / sound in use)
+        if: matrix.target == 'mac'
+        run: |
+          swiftc -O -target arm64-apple-macos11 native/sense.swift -o /tmp/sense-arm64
+          swiftc -O -target x86_64-apple-macos11 native/sense.swift -o /tmp/sense-x64
+          lipo -create /tmp/sense-arm64 /tmp/sense-x64 -output build/brevio-sense
+          chmod +x build/brevio-sense && ./build/brevio-sense --once
       - name: Build macOS app
         if: matrix.target == 'mac'
         run: |
@@ -58,6 +65,10 @@ jobs:
           codesign --force --deep --sign - "$APP"
           ditto -c -k --sequesterRsrc --keepParent "$APP" dist/Brevio-mac.zip
           cp dist/Brevio-mac.zip dist/Mivelle-mac.zip
+      - name: Check the Windows sensor
+        if: matrix.target == 'win'
+        shell: pwsh
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File src/sense-win.ps1 -Once
       - name: Build Windows installer
         if: matrix.target == 'win'
         shell: bash
@@ -89,6 +100,6 @@ jobs:
           **Mac:** download Brevio-mac.zip → open Brevio → Move to Applications.
           **Windows:** download Brevio-Setup.exe → run it.
 
-          Website: https://bubbles-hq.netlify.app/brevio/"
+          Website: https://abhiramupadrashta.github.io/Brevio/"
           if gh release view "$TAG" >/dev/null 2>&1; then gh release upload "$TAG" $FILES --clobber
           else gh release create "$TAG" $FILES --title "$TITLE" --notes "$NOTES" --latest || gh release upload "$TAG" $FILES --clobber; fi

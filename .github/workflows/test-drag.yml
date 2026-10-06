@@ -14,6 +14,7 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - run: npm install --no-audit --no-fund
+      - run: node node_modules/electron/install.js
       - name: Drag test
         shell: pwsh
         run: |
@@ -22,9 +23,11 @@ jobs:
           New-Item -ItemType Directory -Force "$env:APPDATA\Mivelle" | Out-Null
           '{"firstRun":false,"reactNotifications":false,"reactMeetings":false,"reactMusic":false,"breakReminder":false}' | Set-Content "$env:APPDATA\Mivelle\settings.json"
           $ErrorActionPreference = 'Continue'
-          $p = Start-Process -FilePath "node_modules\electron\dist\electron.exe" -ArgumentList "." -PassThru -RedirectStandardOutput "$env:RUNNER_TEMP\out.txt" -RedirectStandardError "$env:RUNNER_TEMP\err.txt"
+          $exe = (node -p "require('electron')").Trim()
+          "electron: $exe" | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          $p = Start-Process -FilePath $exe -ArgumentList "." -PassThru -RedirectStandardOutput "$env:RUNNER_TEMP\out.txt" -RedirectStandardError "$env:RUNNER_TEMP\err.txt"
           Start-Sleep -Seconds 15
-          "exe exists: $(Test-Path node_modules\electron\dist\electron.exe); alive: $(-not $p.HasExited); trace: $(Test-Path $trace)" | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          "exe exists: $(Test-Path $exe); alive: $(-not $p.HasExited); trace: $(Test-Path $trace)" | Out-File $env:GITHUB_STEP_SUMMARY -Append
           if (-not (Test-Path $trace)) { '```' | Out-File $env:GITHUB_STEP_SUMMARY -Append; Get-Content "$env:RUNNER_TEMP\err.txt" -Tail 40 | Out-File $env:GITHUB_STEP_SUMMARY -Append; Get-Content "$env:RUNNER_TEMP\out.txt" -Tail 20 | Out-File $env:GITHUB_STEP_SUMMARY -Append; '```' | Out-File $env:GITHUB_STEP_SUMMARY -Append; exit 0 }
           $src = 'using System; using System.Runtime.InteropServices; public class M { [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y); [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint dx, uint dy, uint d, IntPtr e); [DllImport("user32.dll")] public static extern bool SetProcessDPIAware(); }'
           Add-Type -TypeDefinition $src

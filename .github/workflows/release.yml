@@ -100,6 +100,6 @@ jobs:
           **Mac:** download Brevio-mac.zip → open Brevio → Move to Applications.
           **Windows:** download Brevio-Setup.exe → run it.
 
-          Website: https://abhiramupadrashta.github.io/Brevio/"
+          Website: https://bubbles.foo.ng/Brevio/"
           if gh release view "$TAG" >/dev/null 2>&1; then gh release upload "$TAG" $FILES --clobber
           else gh release create "$TAG" $FILES --title "$TITLE" --notes "$NOTES" --latest || gh release upload "$TAG" $FILES --clobber; fi
